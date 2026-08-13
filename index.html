@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<script>
+  window.fbReady = new Promise(function(resolve, reject){
+    window.__resolveFbReady = resolve;
+    window.__rejectFbReady = reject;
+  });
+
+  /* Stubs de segurança: se o módulo do Firebase demorar ou falhar ao carregar
+     (rede lenta, bloqueador de anúncios, etc.), o app usa esses stubs em vez
+     de travar a tela para sempre. O módulo real sobrescreve essas funções
+     assim que terminar de carregar. */
+  window.fbGetAllUsers = async function(){ return {}; };
+  window.fbCreateUser = async function(){ throw new Error('Banco de dados indisponível no momento. Recarregue a página.'); };
+  window.fbGetProject = async function(){ return null; };
+  window.fbSaveProject = async function(){ throw new Error('Banco de dados indisponível no momento. Recarregue a página.'); };
+
+  setTimeout(function(){
+    if(window.__resolveFbReady){
+      console.warn('Firebase demorou para responder — seguindo com o app mesmo assim.');
+      window.__resolveFbReady();
+    }
+  }, 8000);
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de Borderôs — Altma</title>
@@ -244,7 +266,7 @@
   thead th:nth-child(5){text-align:right;}
   thead th:last-child{text-align:center;width:44px;}
   tbody td{padding:8px 10px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:middle;}
-  tbody input.f-bordero{font-weight:600;}
+  .data-cell{font-size:12px;color:var(--muted);white-space:nowrap;}
   .user-cell{font-size:12px;color:var(--muted);white-space:nowrap;}
   tbody tr:nth-child(even){background:#FBFAF8;}
   tbody input[type="text"]{
@@ -397,6 +419,27 @@
     </div>
 
     <div class="cat-manager">
+      <div class="cat-toggle" id="bordToggle" onclick="toggleBordManager()">
+        <span class="cat-title"><span class="chev">▸</span> Números de Borderô</span>
+        <span style="font-size:12px;color:var(--muted);" id="bordCount">0 borderôs</span>
+      </div>
+      <div class="cat-body" id="bordBody">
+        <p class="cat-hint">
+          Cadastre aqui os números dos borderôs recebidos (ex.: 12, 13, 14...). Ao lançar um pagamento, você só
+          seleciona o número na lista — a data e quem lançou são preenchidos automaticamente.
+        </p>
+        <div id="bordEmptyNote" class="cat-empty-note" style="display:none;">
+          Nenhum borderô cadastrado ainda. Adicione abaixo para poder classificar os lançamentos.
+        </div>
+        <div class="cat-list" id="bordList"></div>
+        <div class="cat-add">
+          <input type="text" id="bordInput" placeholder="Número do borderô (ex.: 12)">
+          <button onclick="addBorderoFromInput()">Adicionar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cat-manager">
       <div class="cat-toggle" id="catToggle" onclick="toggleCatManager()">
         <span class="cat-title"><span class="chev">▸</span> Categorias de Apropriação</span>
         <span style="font-size:12px;color:var(--muted);" id="catCount">0 categorias</span>
@@ -422,11 +465,12 @@
       <table>
         <thead>
           <tr>
-            <th>Borderô Nº / Data</th>
+            <th>Borderô Nº</th>
             <th>Fornecedor</th>
             <th>Descrição do Serviço</th>
             <th>Apropriação</th>
             <th>Valor Pago (R$)</th>
+            <th>Data</th>
             <th>Registrado por</th>
             <th></th>
           </tr>
@@ -436,6 +480,7 @@
           <tr>
             <td class="total-label" colspan="4">TOTAL GERAL</td>
             <td class="total-value" id="totalPago">R$ 0,00</td>
+            <td></td>
             <td></td>
             <td></td>
           </tr>
@@ -462,10 +507,10 @@
     </div>
 
     <div class="footer-note">
-      <b>Como usar:</b> preencha o fornecedor, a descrição do serviço, a apropriação (categoria) e o valor pago em
-      cada linha — os indicadores no topo, o resumo dos borderôs e o resumo por apropriação são calculados
-      automaticamente. Os dados de cada obra (borderôs e categorias) ficam salvos separadamente no navegador. Use
-      "Imprimir / PDF" para gerar um relatório da obra atual.
+      <b>Como usar:</b> cadastre os números de borderô e as categorias de apropriação nos painéis acima. Em cada
+      linha, selecione o número do borderô e a apropriação, preencha fornecedor, descrição e valor — a data e quem
+      lançou são preenchidos automaticamente. Os indicadores no topo, o resumo dos borderôs e o resumo por
+      apropriação são calculados automaticamente. Use "Imprimir / PDF" para gerar um relatório da obra atual.
     </div>
 
   </div>
@@ -520,30 +565,20 @@ const PROJECTS = {
   }
 };
 
-/* Usuários autorizados (nome de exibição : senha) */
-/* Usuários autorizados (nome de exibição : senha) — cadastro fixo inicial */
+/* Usuários autorizados (nome de exibição : senha) — cadastro fixo inicial, sempre disponível mesmo se o Firestore falhar */
 const USERS = {
   'anny': '2531'
 };
 
-/* Usuários criados pelo próprio time via "Criar perfil", salvos no navegador */
-const CUSTOM_USERS_KEY = 'altma_custom_users';
-
-function getCustomUsers(){
+/* Usuários e dados de obra agora vivem no Firestore (banco compartilhado). Ver bloco <script type="module"> no fim do arquivo. */
+async function getAllUsers(){
+  let remoteUsers = {};
   try{
-    const raw = localStorage.getItem(CUSTOM_USERS_KEY);
-    return raw ? JSON.parse(raw) : {};
+    remoteUsers = await window.fbGetAllUsers();
   }catch(e){
-    return {};
+    console.warn('Não foi possível carregar usuários do Firestore, usando apenas os locais.', e);
   }
-}
-
-function saveCustomUsers(users){
-  try{ localStorage.setItem(CUSTOM_USERS_KEY, JSON.stringify(users)); }catch(e){}
-}
-
-function getAllUsers(){
-  return Object.assign({}, USERS, getCustomUsers());
+  return Object.assign({}, USERS, remoteUsers);
 }
 
 let loginMode = 'login';
@@ -551,6 +586,7 @@ let currentUser = null;
 let currentProjectKey = null;
 let pendingProjectKey = null;
 let categories = [];
+let bordNumbers = [];
 
 function formatBRL(n){
   return n.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
@@ -589,61 +625,76 @@ function setLoginMode(mode){
   }
 }
 
-function attemptLogin(){
+async function attemptLogin(){
   const nomeInput = document.getElementById('loginNome');
   const senhaInput = document.getElementById('loginSenha');
   const confirmInput = document.getElementById('loginSenhaConfirm');
   const errBox = document.getElementById('loginError');
+  const submitBtn = document.getElementById('loginSubmitBtn');
   const nome = nomeInput.value.trim();
   const senha = senhaInput.value;
   const key = normalizeName(nome);
-  const allUsers = getAllUsers();
 
   if(!nome || !senha){
     errBox.textContent = 'Preencha nome e senha.';
     return;
   }
 
-  if(loginMode === 'signup'){
-    const confirmSenha = confirmInput.value;
-    if(senha.length < 4){
-      errBox.textContent = 'A senha deve ter pelo menos 4 caracteres.';
-      return;
-    }
-    if(senha !== confirmSenha){
-      errBox.textContent = 'As senhas não coincidem.';
-      return;
-    }
-    if(allUsers[key] !== undefined){
-      errBox.textContent = 'Já existe um perfil com esse nome. Faça login ou escolha outro nome.';
-      return;
-    }
-    const customUsers = getCustomUsers();
-    customUsers[key] = senha;
-    saveCustomUsers(customUsers);
-  } else {
-    if(allUsers[key] === undefined || allUsers[key] !== senha){
-      errBox.textContent = 'Nome ou senha incorretos.';
-      return;
-    }
-  }
-
+  submitBtn.disabled = true;
+  const originalBtnText = submitBtn.textContent;
+  submitBtn.textContent = 'Verificando...';
   errBox.textContent = '';
-  currentUser = nome.charAt(0).toUpperCase() + nome.slice(1);
-  try{ sessionStorage.setItem('altma_current_user', currentUser); }catch(e){}
 
-  nomeInput.value = '';
-  senhaInput.value = '';
-  if(confirmInput) confirmInput.value = '';
-  setLoginMode('login');
+  try{
+    const allUsers = await getAllUsers();
 
-  document.getElementById('viewLogin').classList.add('hidden');
+    if(loginMode === 'signup'){
+      const confirmSenha = confirmInput.value;
+      if(senha.length < 4){
+        errBox.textContent = 'A senha deve ter pelo menos 4 caracteres.';
+        return;
+      }
+      if(senha !== confirmSenha){
+        errBox.textContent = 'As senhas não coincidem.';
+        return;
+      }
+      if(allUsers[key] !== undefined){
+        errBox.textContent = 'Já existe um perfil com esse nome. Faça login ou escolha outro nome.';
+        return;
+      }
+      await window.fbCreateUser(key, senha);
+    } else {
+      if(allUsers[key] === undefined || allUsers[key] !== senha){
+        errBox.textContent = 'Nome ou senha incorretos.';
+        return;
+      }
+    }
 
-  if(pendingProjectKey){
-    enterProject(pendingProjectKey);
-    pendingProjectKey = null;
-  } else {
-    document.getElementById('viewHome').classList.remove('hidden');
+    errBox.textContent = '';
+    currentUser = nome.charAt(0).toUpperCase() + nome.slice(1);
+    try{ sessionStorage.setItem('altma_current_user', currentUser); }catch(e){}
+
+    nomeInput.value = '';
+    senhaInput.value = '';
+    if(confirmInput) confirmInput.value = '';
+    setLoginMode('login');
+
+    document.getElementById('viewLogin').classList.add('hidden');
+
+    if(pendingProjectKey){
+      const target = pendingProjectKey;
+      pendingProjectKey = null;
+      await enterProject(target);
+    } else {
+      document.getElementById('viewHome').classList.remove('hidden');
+      renderProjectGrid();
+    }
+  }catch(e){
+    console.error(e);
+    errBox.textContent = 'Erro de conexão com o banco de dados. Tente novamente.';
+  }finally{
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalBtnText;
   }
 }
 
@@ -665,14 +716,13 @@ function logout(){
   document.getElementById('loginSenha').value = '';
   document.getElementById('loginError').textContent = '';
   document.getElementById('viewHome').classList.remove('hidden');
+  renderProjectGrid();
 }
 
-function getLastBordero(key){
+async function getLastBordero(key){
   try{
-    const raw = localStorage.getItem(storageKey(key));
-    if(!raw) return null;
-    const state = JSON.parse(raw);
-    if(!state.rows || !state.rows.length) return null;
+    const state = await window.fbGetProject(key);
+    if(!state || !state.rows || !state.rows.length) return null;
     for(let i = state.rows.length - 1; i >= 0; i--){
       const r = state.rows[i];
       if(r.bordero && r.bordero.trim()){
@@ -681,16 +731,17 @@ function getLastBordero(key){
     }
     return null;
   }catch(e){
+    console.warn('Não foi possível buscar o último borderô de', key, e);
     return null;
   }
 }
 
-function renderProjectGrid(){
+async function renderProjectGrid(){
   const grid = document.getElementById('projectGrid');
   grid.innerHTML = '';
-  Object.keys(PROJECTS).forEach(key=>{
+  for(const key of Object.keys(PROJECTS)){
     const p = PROJECTS[key];
-    const lastBordero = getLastBordero(key);
+    const lastBordero = await getLastBordero(key);
     const card = document.createElement('div');
     card.className = 'project-card';
     card.onclick = ()=> openProject(key);
@@ -712,18 +763,17 @@ function renderProjectGrid(){
       </div>
     `;
     grid.appendChild(card);
-  });
+  }
 }
 
 function goHome(){
   currentProjectKey = null;
   document.getElementById('viewDashboard').classList.add('hidden');
   document.getElementById('viewHome').classList.remove('hidden');
+  renderProjectGrid();
 }
 
 /* ===================== ABRIR OBRA ===================== */
-
-function storageKey(key){ return 'altma_borderos_' + key + '_v1'; }
 
 function openProject(key){
   if(currentUser){
@@ -741,7 +791,7 @@ function openProject(key){
   }
 }
 
-function enterProject(key){
+async function enterProject(key){
   currentProjectKey = key;
   const p = PROJECTS[key];
 
@@ -756,35 +806,46 @@ function enterProject(key){
   document.getElementById('viewLogin').classList.add('hidden');
   document.getElementById('viewDashboard').classList.remove('hidden');
 
-  loadProjectData(key);
+  await loadProjectData(key);
 }
 
 
-/* ===================== PERSISTÊNCIA POR OBRA ===================== */
+/* ===================== PERSISTÊNCIA POR OBRA (Firestore) ===================== */
 
-function loadProjectData(key){
+async function loadProjectData(key){
   let state = null;
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="8" style="padding:16px;color:var(--muted);font-style:italic;">Carregando dados da obra...</td></tr>';
   try{
-    const raw = localStorage.getItem(storageKey(key));
-    if(raw) state = JSON.parse(raw);
-  }catch(e){}
+    state = await window.fbGetProject(key);
+  }catch(e){
+    console.error('Erro ao carregar dados do Firestore:', e);
+  }
 
   document.getElementById('tbody').innerHTML = '';
   categories = (state && state.categories) ? state.categories : [];
+  bordNumbers = (state && state.bordNumbers) ? state.bordNumbers : [];
   renderCatList();
+  renderBordList();
 
   if(state && state.rows && state.rows.length){
     state.rows.forEach(r => addRow(r, false));
   } else {
-    addRow({bordero:'', fornecedor:'', descricao:'', categoria:'', valor:'', usuario:''}, false);
+    addRow({bordero:'', fornecedor:'', descricao:'', categoria:'', valor:'', data:'', usuario:''}, false);
   }
   recalc();
 }
 
+let saveTimeout = null;
 function saveState(){
   if(!currentProjectKey) return;
-  const state = { categories: categories, rows: getRows() };
-  try{ localStorage.setItem(storageKey(currentProjectKey), JSON.stringify(state)); }catch(e){}
+  const key = currentProjectKey;
+  const state = { categories: categories, bordNumbers: bordNumbers, rows: getRows() };
+  if(saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(()=>{
+    window.fbSaveProject(key, state).catch(e=>{
+      console.error('Erro ao salvar no Firestore:', e);
+    });
+  }, 500);
 }
 
 function getRows(){
@@ -796,6 +857,7 @@ function getRows(){
       descricao: tr.querySelector('.f-descricao').value,
       categoria: tr.querySelector('.f-categoria').value,
       valor: tr.querySelector('.f-valor').value,
+      data: tr.dataset.data || '',
       usuario: tr.dataset.usuario || ''
     });
   });
@@ -896,14 +958,117 @@ function refreshAllCategorySelects(){
   recalc();
 }
 
+/* ===================== NÚMEROS DE BORDERÔ ===================== */
+
+function toggleBordManager(){
+  document.getElementById('bordToggle').classList.toggle('open');
+  document.getElementById('bordBody').classList.toggle('open');
+}
+
+function renderBordList(){
+  const list = document.getElementById('bordList');
+  const emptyNote = document.getElementById('bordEmptyNote');
+  const count = document.getElementById('bordCount');
+  list.innerHTML = '';
+  if(bordNumbers.length === 0){
+    emptyNote.style.display = 'block';
+  } else {
+    emptyNote.style.display = 'none';
+    bordNumbers.forEach((bn, idx)=>{
+      const chip = document.createElement('div');
+      chip.className = 'cat-chip';
+      chip.innerHTML = `<span>${escapeHtml(bn)}</span><button title="Remover" onclick="removeBordero(${idx})">×</button>`;
+      list.appendChild(chip);
+    });
+  }
+  count.textContent = bordNumbers.length + (bordNumbers.length === 1 ? ' borderô' : ' borderôs');
+}
+
+function addBorderoFromInput(){
+  const input = document.getElementById('bordInput');
+  const val = input.value.trim();
+  if(!val) return;
+  if(bordNumbers.some(b => b.toLowerCase() === val.toLowerCase())){
+    input.value = '';
+    return;
+  }
+  bordNumbers.push(val);
+  input.value = '';
+  renderBordList();
+  refreshAllBorderoSelects();
+  saveState();
+}
+
+document.addEventListener('keydown', function(e){
+  if(e.target && e.target.id === 'bordInput' && e.key === 'Enter'){
+    e.preventDefault();
+    addBorderoFromInput();
+  }
+});
+
+function removeBordero(idx){
+  bordNumbers.splice(idx, 1);
+  renderBordList();
+  refreshAllBorderoSelects();
+  saveState();
+}
+
+function buildBorderoSelect(selectedValue){
+  const sel = document.createElement('select');
+  sel.className = 'f-bordero';
+  const optEmpty = document.createElement('option');
+  optEmpty.value = '';
+  optEmpty.textContent = bordNumbers.length ? 'Selecione...' : 'Cadastre borderôs acima';
+  sel.appendChild(optEmpty);
+  bordNumbers.forEach(bn=>{
+    const opt = document.createElement('option');
+    opt.value = bn;
+    opt.textContent = bn;
+    if(bn === selectedValue) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if(selectedValue && !bordNumbers.includes(selectedValue)){
+    const opt = document.createElement('option');
+    opt.value = selectedValue;
+    opt.textContent = selectedValue + ' (removido)';
+    opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.classList.toggle('empty', !sel.value);
+  sel.addEventListener('change', ()=>{
+    sel.classList.toggle('empty', !sel.value);
+    recalc(); saveState();
+  });
+  return sel;
+}
+
+function refreshAllBorderoSelects(){
+  document.querySelectorAll('#tbody tr').forEach(tr=>{
+    const oldSelect = tr.querySelector('.f-bordero');
+    const currentVal = oldSelect.value;
+    const newSelect = buildBorderoSelect(currentVal);
+    oldSelect.replaceWith(newSelect);
+  });
+  recalc();
+}
+
+function todayFormatted(){
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+
 /* ===================== LINHAS DA TABELA ===================== */
 
 function makeRow(data){
-  data = data || {bordero:'', fornecedor:'', descricao:'', categoria:'', valor:'', usuario:''};
+  data = data || {bordero:'', fornecedor:'', descricao:'', categoria:'', valor:'', data:'', usuario:''};
   const tr = document.createElement('tr');
 
   const tdB = document.createElement('td');
-  tdB.innerHTML = `<input type="text" class="f-bordero" placeholder="Ex.: Borderô 12 - 24/08" value="${escapeHtml(data.bordero)}">`;
+  tdB.appendChild(buildBorderoSelect(data.bordero));
 
   const tdF = document.createElement('td');
   tdF.innerHTML = `<input type="text" class="f-fornecedor" placeholder="Nome do fornecedor" value="${escapeHtml(data.fornecedor)}">`;
@@ -916,6 +1081,11 @@ function makeRow(data){
 
   const tdV = document.createElement('td');
   tdV.innerHTML = `<input type="number" class="f-valor" placeholder="0,00" step="0.01" min="0" value="${data.valor}">`;
+
+  const tdData = document.createElement('td');
+  tdData.className = 'data-cell';
+  tr.dataset.data = data.data || todayFormatted();
+  tdData.textContent = tr.dataset.data;
 
   const tdUser = document.createElement('td');
   tdUser.className = 'user-cell';
@@ -931,6 +1101,7 @@ function makeRow(data){
   tr.appendChild(tdD);
   tr.appendChild(tdC);
   tr.appendChild(tdV);
+  tr.appendChild(tdData);
   tr.appendChild(tdUser);
   tr.appendChild(tdDel);
 
@@ -1029,14 +1200,72 @@ function renderBreakdown(catTotals){
 
 /* ===================== INIT ===================== */
 
-(function initApp(){
+(async function initApp(){
   let savedUser = null;
   try{ savedUser = sessionStorage.getItem('altma_current_user'); }catch(e){}
   if(savedUser){
     currentUser = savedUser;
   }
+  if(window.fbReady){
+    try{ await window.fbReady; }catch(e){ console.error('Falha ao conectar ao Firebase:', e); }
+  }
   renderProjectGrid();
 })();
+</script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+  import {
+    getFirestore, collection, doc, getDoc, getDocs, setDoc
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCPMa7wu8LA9pusiDYmhFv14SH4cUrVPcA",
+    authDomain: "altma---controle-de-borderos.firebaseapp.com",
+    projectId: "altma---controle-de-borderos",
+    storageBucket: "altma---controle-de-borderos.firebasestorage.app",
+    messagingSenderId: "933095081108",
+    appId: "1:933095081108:web:cf31aac598017a1bef6081",
+    measurementId: "G-XSM7N4YREG"
+  };
+
+  try{
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    window.fbGetAllUsers = async function(){
+      const snap = await getDocs(collection(db, "users"));
+      const result = {};
+      snap.forEach(function(docSnap){
+        const data = docSnap.data();
+        result[docSnap.id] = data.password;
+      });
+      return result;
+    };
+
+    window.fbCreateUser = async function(key, password){
+      await setDoc(doc(db, "users", key), { password: password, createdAt: Date.now() });
+    };
+
+    window.fbGetProject = async function(key){
+      const snap = await getDoc(doc(db, "projects", key));
+      if(!snap.exists()) return null;
+      return snap.data();
+    };
+
+    window.fbSaveProject = async function(key, data){
+      await setDoc(doc(db, "projects", key), data);
+    };
+
+    window.__resolveFbReady();
+  }catch(e){
+    console.error("Erro ao inicializar Firebase:", e);
+    window.fbGetAllUsers = async function(){ return {}; };
+    window.fbCreateUser = async function(){ throw new Error("Firebase indisponível"); };
+    window.fbGetProject = async function(){ return null; };
+    window.fbSaveProject = async function(){ throw new Error("Firebase indisponível"); };
+    window.__rejectFbReady(e);
+  }
 </script>
 
 </body>
