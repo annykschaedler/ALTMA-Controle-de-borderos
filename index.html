@@ -419,27 +419,6 @@
     </div>
 
     <div class="cat-manager">
-      <div class="cat-toggle" id="bordToggle" onclick="toggleBordManager()">
-        <span class="cat-title"><span class="chev">▸</span> Números de Borderô</span>
-        <span style="font-size:12px;color:var(--muted);" id="bordCount">0 borderôs</span>
-      </div>
-      <div class="cat-body" id="bordBody">
-        <p class="cat-hint">
-          Cadastre aqui os números dos borderôs recebidos (ex.: 12, 13, 14...). Ao lançar um pagamento, você só
-          seleciona o número na lista — a data e quem lançou são preenchidos automaticamente.
-        </p>
-        <div id="bordEmptyNote" class="cat-empty-note" style="display:none;">
-          Nenhum borderô cadastrado ainda. Adicione abaixo para poder classificar os lançamentos.
-        </div>
-        <div class="cat-list" id="bordList"></div>
-        <div class="cat-add">
-          <input type="text" id="bordInput" placeholder="Número do borderô (ex.: 12)">
-          <button onclick="addBorderoFromInput()">Adicionar</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="cat-manager">
       <div class="cat-toggle" id="catToggle" onclick="toggleCatManager()">
         <span class="cat-title"><span class="chev">▸</span> Categorias de Apropriação</span>
         <span style="font-size:12px;color:var(--muted);" id="catCount">0 categorias</span>
@@ -507,10 +486,10 @@
     </div>
 
     <div class="footer-note">
-      <b>Como usar:</b> cadastre os números de borderô e as categorias de apropriação nos painéis acima. Em cada
-      linha, selecione o número do borderô e a apropriação, preencha fornecedor, descrição e valor — a data e quem
-      lançou são preenchidos automaticamente. Os indicadores no topo, o resumo dos borderôs e o resumo por
-      apropriação são calculados automaticamente. Use "Imprimir / PDF" para gerar um relatório da obra atual.
+      <b>Como usar:</b> cadastre as categorias de apropriação no painel acima. Em cada linha, selecione o número do
+      borderô (de 1 a 500) e a apropriação, preencha fornecedor, descrição e valor — a data e quem lançou são
+      preenchidos automaticamente. Os indicadores no topo, o resumo dos borderôs e o resumo por apropriação são
+      calculados automaticamente. Use "Imprimir / PDF" para gerar um relatório da obra atual.
     </div>
 
   </div>
@@ -586,7 +565,6 @@ let currentUser = null;
 let currentProjectKey = null;
 let pendingProjectKey = null;
 let categories = [];
-let bordNumbers = [];
 
 function formatBRL(n){
   return n.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
@@ -823,9 +801,7 @@ async function loadProjectData(key){
 
   document.getElementById('tbody').innerHTML = '';
   categories = (state && state.categories) ? state.categories : [];
-  bordNumbers = (state && state.bordNumbers) ? state.bordNumbers : [];
   renderCatList();
-  renderBordList();
 
   if(state && state.rows && state.rows.length){
     state.rows.forEach(r => addRow(r, false));
@@ -839,7 +815,7 @@ let saveTimeout = null;
 function saveState(){
   if(!currentProjectKey) return;
   const key = currentProjectKey;
-  const state = { categories: categories, bordNumbers: bordNumbers, rows: getRows() };
+  const state = { categories: categories, rows: getRows() };
   if(saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(()=>{
     window.fbSaveProject(key, state).catch(e=>{
@@ -958,79 +934,26 @@ function refreshAllCategorySelects(){
   recalc();
 }
 
-/* ===================== NÚMEROS DE BORDERÔ ===================== */
-
-function toggleBordManager(){
-  document.getElementById('bordToggle').classList.toggle('open');
-  document.getElementById('bordBody').classList.toggle('open');
-}
-
-function renderBordList(){
-  const list = document.getElementById('bordList');
-  const emptyNote = document.getElementById('bordEmptyNote');
-  const count = document.getElementById('bordCount');
-  list.innerHTML = '';
-  if(bordNumbers.length === 0){
-    emptyNote.style.display = 'block';
-  } else {
-    emptyNote.style.display = 'none';
-    bordNumbers.forEach((bn, idx)=>{
-      const chip = document.createElement('div');
-      chip.className = 'cat-chip';
-      chip.innerHTML = `<span>${escapeHtml(bn)}</span><button title="Remover" onclick="removeBordero(${idx})">×</button>`;
-      list.appendChild(chip);
-    });
-  }
-  count.textContent = bordNumbers.length + (bordNumbers.length === 1 ? ' borderô' : ' borderôs');
-}
-
-function addBorderoFromInput(){
-  const input = document.getElementById('bordInput');
-  const val = input.value.trim();
-  if(!val) return;
-  if(bordNumbers.some(b => b.toLowerCase() === val.toLowerCase())){
-    input.value = '';
-    return;
-  }
-  bordNumbers.push(val);
-  input.value = '';
-  renderBordList();
-  refreshAllBorderoSelects();
-  saveState();
-}
-
-document.addEventListener('keydown', function(e){
-  if(e.target && e.target.id === 'bordInput' && e.key === 'Enter'){
-    e.preventDefault();
-    addBorderoFromInput();
-  }
-});
-
-function removeBordero(idx){
-  bordNumbers.splice(idx, 1);
-  renderBordList();
-  refreshAllBorderoSelects();
-  saveState();
-}
+const BORDERO_MAX = 500;
 
 function buildBorderoSelect(selectedValue){
   const sel = document.createElement('select');
   sel.className = 'f-bordero';
   const optEmpty = document.createElement('option');
   optEmpty.value = '';
-  optEmpty.textContent = bordNumbers.length ? 'Selecione...' : 'Cadastre borderôs acima';
+  optEmpty.textContent = 'Selecione...';
   sel.appendChild(optEmpty);
-  bordNumbers.forEach(bn=>{
+  for(let n = 1; n <= BORDERO_MAX; n++){
     const opt = document.createElement('option');
-    opt.value = bn;
-    opt.textContent = bn;
-    if(bn === selectedValue) opt.selected = true;
+    opt.value = String(n);
+    opt.textContent = String(n);
+    if(String(n) === selectedValue) opt.selected = true;
     sel.appendChild(opt);
-  });
-  if(selectedValue && !bordNumbers.includes(selectedValue)){
+  }
+  if(selectedValue && (isNaN(Number(selectedValue)) || Number(selectedValue) < 1 || Number(selectedValue) > BORDERO_MAX)){
     const opt = document.createElement('option');
     opt.value = selectedValue;
-    opt.textContent = selectedValue + ' (removido)';
+    opt.textContent = selectedValue;
     opt.selected = true;
     sel.appendChild(opt);
   }
@@ -1040,16 +963,6 @@ function buildBorderoSelect(selectedValue){
     recalc(); saveState();
   });
   return sel;
-}
-
-function refreshAllBorderoSelects(){
-  document.querySelectorAll('#tbody tr').forEach(tr=>{
-    const oldSelect = tr.querySelector('.f-bordero');
-    const currentVal = oldSelect.value;
-    const newSelect = buildBorderoSelect(currentVal);
-    oldSelect.replaceWith(newSelect);
-  });
-  recalc();
 }
 
 function todayFormatted(){
